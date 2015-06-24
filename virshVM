@@ -1,0 +1,109 @@
+#!/usr/bin/env ruby
+
+require 'pp'
+require 'resolv'
+require 'getoptlong'
+
+if ARGV.length == 0
+    puts "Missing dir argument (try --help)"
+    exit 1
+end
+
+opts = GetoptLong.new(
+    ['--name', '-n', GetoptLong::REQUIRED_ARGUMENT],
+    ['--is', '-i', GetoptLong::REQUIRED_ARGUMENT],
+    ['--help', '-h', GetoptLong::NO_ARGUMENT]
+)
+
+def help() 
+    puts ""
+    puts "   Usage #{$0} : "
+    puts "\t--name | -n \t Name of new VM"
+    puts "\t--is | -i \t Check exist or noexist ?"
+    puts "\t"
+    puts "\t--help | -h \t This help"
+    puts ""
+    puts "\texample: #{$0} --name dave-01 --is exist" 
+end
+
+@listExist=['exist', 'noexist', 'running', 'norunning']
+
+opts.each do |opt, arg|
+    case opt 
+        when '--help'
+            help()
+            exit
+        when '--name'
+            @name = arg
+        when '--is'
+            if @listExist.include? arg
+                @what=arg
+            else
+                puts "You should to choose between:"
+                puts @listExist
+                exit 1
+            end
+    end
+end
+
+if ! @what
+    puts "Choose between exist or noexist option"
+    exit 1
+end
+
+    
+if ! @name
+    puts "Choose a VM name to icheck"
+    exit 1
+end
+
+def existOrNot
+    exist=system("virsh list --all --name | grep -q #{@name}")
+    if exist
+        puts "VM #{@name} exist"
+        case @what
+            when 'exist'
+                exit 0
+            when 'noexist'
+                exit 1
+        end
+    else
+        puts "VM #{@name} doesn't exist"
+        case @what
+            when 'exist'
+                exit 1
+            when 'noexist'
+                exit 0
+        end
+    end
+end
+
+def runningOrNot
+    running=`virsh list --all | grep #{@name} | awk '{print $NF}'`
+    if running.strip == 'running'
+        puts "VM #{@name} is running"
+        case @what
+            when 'running'
+                exit 0
+            when 'norunning'
+                exit 1
+        end
+    else
+        puts "VM #{@name} is not running"
+        case @what
+            when 'running'
+                exit 1
+            when 'noruning'
+                exit 0
+        end
+    end
+end
+
+if @what.match(/exist/)
+    existOrNot
+elsif @what.match(/running/)
+    runningOrNot
+else
+    puts "wrong arg"
+    exit 1
+end

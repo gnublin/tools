@@ -1,0 +1,140 @@
+#!/usr/bin/env ruby
+
+require 'pp'
+require 'getoptlong'
+#require 'fileutils'
+require 'securerandom'
+
+
+opts = GetoptLong.new(
+    ['--name', '-n', GetoptLong::REQUIRED_ARGUMENT],
+    ['--what', '-w', GetoptLong::REQUIRED_ARGUMENT],
+    ['--cpu', '-c', GetoptLong::REQUIRED_ARGUMENT],
+    ['--memory', '-m', GetoptLong::REQUIRED_ARGUMENT],
+    ['--help', '-h', GetoptLong::NO_ARGUMENT],
+)
+
+if ARGV.length == 0
+    puts "Missing dir argument (try --help)"
+    exit 1
+end
+
+
+@vmPath='/etc/libvirt/qemu'
+@templateName='template'
+@vmUUID=SecureRandom.uuid
+macST=SecureRandom.hex(3).gsub(/(.{2})/, ':\1')
+@vmMac="52:54:00#{macST}"
+
+def help() 
+    puts ""
+    puts "   Usage #{$0} : "
+    puts "\t--what | \t create, delete, reset "
+    puts "\t--name | -n \t Name of destination image disk"
+    puts "\t--cpu | -c \t Number of CPU threads (optional, default: 4 vCPU)"
+    puts "\t--memory | -m \t Number of RAM in Go (optional, defaul: 8Go)"
+    puts "\t"
+    puts "\t--help | -h \t This help"
+    puts ""
+    puts "\texample: #{$0} --create --name admin-01"
+    puts "\texample: #{$0} --delete --name admin-01"
+    puts "\texample: #{$0} --reset --name admin-02"
+end
+
+@typeWhat = [ 'create', 'delete', 'reset' ]
+
+
+opts.each do |opt, arg|
+    case opt 
+        when '--help'
+            help()
+            exit
+        when '--name'
+            @vmName = arg
+        when '--what'
+            if @typeWhat.include? arg
+                @what = arg
+            else
+                puts "What #{arg} not recognised"
+            end
+        when '--cpu'
+            @vmCPU = arg
+        when '--memory'
+            @vmMemory = arg
+    end
+end
+
+
+if ! @vmName
+    puts "Name is required"
+end
+
+if ! @vmMemory
+    @vmMemory = '8'
+end
+
+if ! @vmCPU
+    @vmCPU = '4'
+end
+
+def alreadyExist()
+    virshListAll=`virsh list --all | grep '#{@vmName}' | awk '{print $NF}'`
+    if ! virshListAll.empty?
+        exist=true
+        puts "VM #{@vmName} already exist and is in '#{virshListAll.strip}' mode"
+    else
+        exist=false
+    end
+end
+
+def vmPerms()
+    testWriteFile=File.writable?(@vmPath)
+    if ! testWriteFile
+        puts "You don't have permission to execute this script"
+        exit 1
+    end
+end
+
+def createVM()
+    @vmXML="#{@vmPath}/#{@vmName}.xml"
+    if File.exist?("#{@vmXML}")
+        puts "Configuration file #{@vmXML} already exist"
+        exit 1
+    else
+        vmXMLFile=File.open(@vmXML, 'w')
+        vmXMLTemplate=File.open("#{@vmPath}/#{@templateName}.xml",'r')
+        vmXMLTemplate.each do |line|
+            vmXMLFile.puts line.gsub(/VM_NAME/,@vmName).gsub(/VM_MEMORY/,@vmMemory).gsub(/VM_CPU/,@vmCPU).gsub(/VM_UUID/,"#{@vmUUID}").gsub(/VM_MAC/,@vmMac)
+        end
+        vmXMLFile.close
+        vmXMLTemplate.close
+    end
+end
+
+def deleteVM()
+    @vmXML="#{@vmPath}/#{@vmName}.xml"
+    if File.exist?("#{@vmXML}")
+        deleteXMLFile=system("rm -f #{@vmXML}")
+    else
+        puts "Xml file doesn't exist. Nothing to do."
+        exit 0
+    end 
+    if deleteXMLFile
+        puts "Xml file has been deleted"
+        exit 0
+    else
+        puts "en error occured whith Xml deletion"
+        exit 1
+    end 
+end
+
+vmPerms
+case @what
+    when 'create'
+        createVM
+    when 'delete'
+        deleteVM
+    when 'reset'
+        puts @what
+end
+

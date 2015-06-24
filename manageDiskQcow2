@@ -1,0 +1,162 @@
+#!/usr/bin/env ruby
+
+require 'pp'
+require 'getoptlong'
+require 'rsync'
+
+opts = GetoptLong.new(
+    ['--size', '-S', GetoptLong::REQUIRED_ARGUMENT],
+    ['--source', '-s', GetoptLong::REQUIRED_ARGUMENT],
+    ['--name', '-n', GetoptLong::REQUIRED_ARGUMENT],
+    ['--type', '-t', GetoptLong::REQUIRED_ARGUMENT],
+    ['--what', '-w', GetoptLong::REQUIRED_ARGUMENT],
+    ['--help', '-h', GetoptLong::NO_ARGUMENT],
+    ['--force', '-f', GetoptLong::NO_ARGUMENT],
+)
+
+@diskPath='/var/lib/libvirt/images'
+
+if ARGV.length == 0
+    puts "Missing dir argument (try --help)"
+    exit 1
+end
+
+
+def help() 
+    puts ""
+    puts "   Usage #{$0} : "
+    puts "\t--what | \t create | clone "
+    puts "\t Create :"
+    puts "\t--size | -s \t Size of source image disk"
+    puts "\t--name | -n \t Name of destination image disk"
+    puts "\t--type | -t \t Type of image disk (home or slash)"
+    puts "\t--force | -f \t Force to replace destination"
+    puts "\t"
+    puts "\t Clone :"
+    puts "\t--source | -S \t Source of source image disk, if clone mode"
+    puts "\t--name | -n \t Name of destination image disk"
+    puts "\t--type | -t \t Type of image disk (home or slash)"
+    puts "\t--force | -f \t Force to replace destination"
+    puts "\t"
+    puts "\t--help | -h \t This help"
+    puts ""
+    puts "\texample: #{$0} --create --size 20 --name admin-01 --type home"
+    puts "\texample: #{$0} --clone --source admin-01 --name admin-02 --type home"
+end
+
+@typeArray = [ 'home', 'slash' ]
+
+
+opts.each do |opt, arg|
+    case opt 
+        when '--help'
+            help()
+            exit
+        when '--source'
+            @diskSource = arg
+        when '--size'
+            @diskSize = arg
+        when '--name'
+            @diskName = arg
+        when '--force'
+            @diskForce = 'yes'
+        when '--what'
+            @what = arg
+        when '--type'
+            if @typeArray.include? arg
+                @diskType = arg
+            else
+                puts "Type is not recognised"
+                exit 1
+            end
+    end
+end
+
+if ! @diskName
+    puts "Name required"
+    exit 1
+end
+
+if @what == 'create'
+    if ! @diskSize
+        puts "Disk size"
+        exit 1
+    end
+elsif @what == 'clone'
+    if ! @diskSource
+        puts "Source required"
+        exit 1
+    end
+    @diskSrcFullName="#{@diskPath}/#{@diskSource}-#{@diskType}.qcow2"
+end
+
+if ! @diskType
+    puts "Type required"
+    exit 1
+end
+
+@diskFullName="#{@diskPath}/#{@diskName}-#{@diskType}.qcow2"
+
+def imageAlreadyExist()
+    if File.exist?("#{@diskFullName}")
+        puts "Disk #{@diskFullName} already exist. Nothing to do!"
+        exit 0
+    end
+end
+
+def imageSourceExist()
+    if ! File.exist?("#{@diskSource}/#{@diskFullName}")
+        puts "Image disk source not exist."
+        exit 0
+    end
+end
+
+def imagePerms()
+    if ! File.writable?(@diskPath)
+        puts "you don't have permission to write in path"
+        exit 1
+    end
+end
+
+def imageCreation
+    imgCreate=`qemu-img create -f qcow2 -o preallocation='metadata' #{@diskPath}/#{@diskFullName} #{@diskSize}G`
+    if imgCreate
+        imgSize=`echo #{imgCreate.strip} | awk '{print $4}' | awk -F \= '{print $2}'`
+        imgAlloc=system("fallocate -l #{imgSize.strip} #{@diskPath}/#{@diskFullName} ")
+    end
+    if imgAlloc
+        imgPerms=system("chown libvirt-qemu:libvirt-qemu #{@diskPath}/#{@diskFullName}")
+    end
+    if imgPerms
+        puts "Disk image created successfully"
+    end
+end
+
+def imageClone
+    rsyncResult = Rsync.run(@diskSrcFullName, @diskFullName)
+    testDiskSrc = File.exist?(@diskSrcFullName)
+    if testDiskSrc
+        if rsyncResult.success?
+            puts "Clone #{@diskFullName} successfully"
+        end
+    else
+        puts "Image source doesn't exist"
+        exit 1
+    end
+end
+
+imagePerms
+if @diskForce == 'yes'
+    removeResult=system("rm -rf #{@diskPath}/#{@diskFullName}")
+    if removeResult
+        puts "Image disk #{@diskFullName} has been removed"
+    end
+else
+    imageAlreadyExist
+end
+
+if @what == 'create'
+    imageCreation
+elsif @what == 'clone'
+    imageClone
+end

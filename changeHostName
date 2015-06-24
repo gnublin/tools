@@ -1,0 +1,182 @@
+#!/usr/bin/env ruby
+
+require 'pp'
+require 'resolv'
+require 'getoptlong'
+
+if ARGV.length == 0
+    puts "Missing dir argument (try --help)"
+    exit 1
+end
+
+@fqdn='shpb.dev'
+@diskPath='/var/lib/libvirt/images'
+@fileChangeList=['etc/network/interfaces', 'etc/hosts', 'etc/mailname', 'etc/hostname']
+@rmDirList=['/var/lib/puppet/ssl']
+
+opts = GetoptLong.new(
+    ['--name', '-n', GetoptLong::REQUIRED_ARGUMENT],
+    ['--oldname', '-o', GetoptLong::REQUIRED_ARGUMENT],
+    ['--help', '-h', GetoptLong::NO_ARGUMENT],
+)
+
+def help() 
+    puts ""
+    puts "   Usage #{$0} : "
+    puts "\t--name | -n \t Name of new VM"
+    puts "\t--oldname | -o \t Old name of VM (default dave-01)"
+    puts "\t"
+    puts "\t--help | -h \t This help"
+    puts ""
+    puts "\texample: #{$0} --name dave-01"
+end
+
+opts.each do |opt, arg|
+    case opt 
+        when '--help'
+            help()
+            exit
+        when '--name'
+            @name = arg
+        when '--oldname'
+            @oldName = arg
+    end
+end
+
+@loopToUse=0
+@testLoop=1
+
+if ! @oldName
+    @oldName = 'dave-01'
+end
+
+
+@newIP=`/usr/local/bin/getNetwork --name #{@name}.#{@fqdn} 2>/dev/null`.strip
+@oldIP=`/usr/local/bin/getNetwork --name #{@oldName}.#{@fqdn} 2>/dev/null`.strip
+
+if @newIP == ''
+    puts 'An error occured, please contact your favorite system administrator'
+    exit 1
+end
+
+def checkLoop(loopNu)
+    return checkLoopInUse=`ls -l /dev/nbd#{loopNu}* | grep p[0-9]*$ | wc -l`.strip.to_i
+end
+
+def detectLoop
+    for loopt in 0..9 do
+        @testLoop=0
+        @testLoop=checkLoop(@loopToUse)
+        if @testLoop == 0
+            break
+        end
+        @loopToUse+=1
+    end
+end
+
+
+def connectLoop
+    @loopConnect=system("qemu-nbd -c /dev/nbd#{@loopToUse} #{@diskPath}/#{@name}-slash.qcow2")
+    if ! @loopConnect
+        puts "An error occured to disconnect the loop /dev/nbd#{@loopToUse}"
+        exit 1
+    else
+        puts "/dev/nbd#{@loopToUse} has been successfully connected"
+    end
+end
+
+def disconnectLoop
+    mounted=isMounted
+    if mounted == 0
+        @loopDisconnect=system("qemu-nbd -d /dev/nbd#{@loopToUse}")
+        if ! @loopDisconnect
+            puts "An error occured to disconnect the loop /dev/nbd#{@loopToUse}"
+        else
+            puts "/dev/nbd#{@loopToUse} has been disconnected successfully"
+        end
+    else
+        puts "An error occurred..."
+    end
+end
+
+def isMounted
+    return`mount | grep "/tmp/#{@name}" | wc -l`.strip.to_i
+end
+
+def mountLoop
+    mounted=isMounted
+    if mounted != 0
+        puts "DiskAlready mounted"
+        disconnectLoop
+        exit 1
+    end
+    tempDir=File.exist?("/tmp/#{@name}")
+    if ! tempDir
+        Dir.mkdir("/tmp/#{@name}")
+    end
+    mount=system("mount /dev/nbd#{@loopToUse}p1 /tmp/#{@name}")
+    if mount
+        puts "/dev/nbd#{@loopToUse} has been mounted successfully" 
+    else
+        puts "mount /dev/nbd#{@loopToUse}p1 failed"
+        disconnectLoop
+        exit 1
+    end
+end
+
+def replaceOldToNew
+    mounted=isMounted
+    if mounted != 1
+        puts "Mount problem"
+        disconnectLoop
+        exit 1
+    end
+    @fileChangeList.each do |fileToChange|
+        fileName = "/tmp/#{@name}/#{fileToChange}"
+        if File.exist?(fileName)
+            openFileName=File.open(fileName, 'r')
+            openFileNameContent=openFileName.read
+            openFileNameNewContent=openFileNameContent.gsub(/#{@oldIP}/,"#{@newIP}").gsub(/#{@oldName}/,"#{@name}")
+            openFileName.close
+            openFileNameNew=File.open(fileName,"w")
+
+            openFileNameNewContent.each_line do |newLine|
+                openFileNameNew.puts newLine
+            end
+            openFileNameNew.close
+            puts " - File #{fileToChange} has been replaced"
+            fileOK = true
+        end
+    end
+end
+
+def deleteDir
+    mounted=isMounted
+    if mounted != 1
+        puts "Mount problem"
+        disconnectLoop
+        exit 1
+    end
+    rmDirList.each do |dirToRm|
+        dirName = "/tmp/#{@name}/#{dirToRm}"
+        if Dir.exist.(dirName)
+            rmResult=system("rm -rf #{dirName}")
+            if rmResult
+                puts " - Dir #{dirToRm} has been removed"
+            end
+        end
+    end
+end
+
+def umountLoop
+    return system("umount /tmp/#{@name}")
+end
+
+
+
+detectLoop
+connectLoop
+mountLoop
+replaceOldToNew
+umountLoop
+disconnectLoop
