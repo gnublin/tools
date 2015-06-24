@@ -1,0 +1,157 @@
+#!/usr/bin/env ruby
+
+require 'httparty'
+require 'json'
+require 'getoptlong'
+require 'pp'
+
+@svnRepo="http://svn.shpb.lan/public/templateES"
+
+if ARGV.length == 0
+    puts "Missing dir argument (try --help)"
+    exit 1
+end
+
+opts = GetoptLong.new(
+    ['--env', '-e', GetoptLong::REQUIRED_ARGUMENT],
+    ['--rev', '-r', GetoptLong::REQUIRED_ARGUMENT],
+    ['--name', '-n', GetoptLong::REQUIRED_ARGUMENT],
+    ['--help', '-h', GetoptLong::NO_ARGUMENT]
+)
+
+def help() 
+    puts ""
+    puts "   Usage #{$0} : "
+    puts "\t--env | -e \t Environment (prod|qa)"
+    puts "\t--rev | -r \t Specify a revision. Default last. If set, name is needed"
+    puts "\t--name | -r \t Specify a name of template. Default all"
+    puts "\t"
+    puts "\t--help | -h \t This help"
+    puts ""
+    puts "\texample: #{$0} --env qa --rev 4 --name trck_traffic"
+    puts "\texample: #{$0} --env qa"
+end
+
+@esList = {'qa' => ['qalog-01'], 'prod-stats' => ['es-03','es-04']}
+
+opts.each do |opt, arg|
+    case opt 
+        when '--help'
+            help()
+            exit
+        when '--env'
+            if @esList["#{arg}"]
+                @env = arg
+            else
+                puts "Env '#{arg}' is not recognised"
+                exit 1
+            end
+        when '--rev'
+            @rev = arg
+        when '--name'
+            @name = arg
+    end
+end
+
+if !@env
+    puts "Env is needed"
+    exit 1
+end
+
+if !@rev
+    @rev='last'
+else
+    if !@name
+        puts 'You should specify a name of template with rev argument'
+        exit 1 
+    end
+end
+
+if !@name 
+    @name='all'
+end
+
+@targetHash=Hash.new
+
+def getRev()
+    listTemplate=`svn list #{@svnRepo}`.strip
+# to array
+    lastVersionValue=0
+    listTemplate=listTemplate.split("\n")
+    listTemplate.each do |pattern|
+        patternValue = pattern.scan( /([a-z]+.*)_.*/).last[0]
+        versionValue = pattern.scan( /[a-z]+.*_v(.*).json/).last[0].to_i
+        if versionValue > lastVersionValue
+            @targetHash[:"#{patternValue}"]=versionValue
+            lastVersionValue=versionValue
+        end
+    end
+end
+
+def checkES()
+    @esList[@env].each do |esToTest|
+        response = HTTParty.get("http://#{esToTest}:9200/_cat/health")            
+        if response.code ==  200
+            @esServer = esToTest
+            puts "Query will be execute on #{@esServer}"
+            break
+        end
+    end
+end
+
+def isTemplateExist()
+    response = HTTParty.get("http://#{@esServer}:9200/_template/")
+    json = JSON.parse(response.body)
+    
+    isTemplate=json[@templateName]
+    
+    if isTemplate
+        return 0
+    else
+        return 1
+    end
+
+end
+
+def deleteTemplate
+    resultDelete = HTTParty.delete("http://#{@esServer}:9200/_template/#{@templateName}")
+    if resultDelete.code == 200
+        puts "#{@templateName} has been successfully deleted on #{@templateName}"
+    else
+        puts "An error occured when trying to delete #{@templateName}. Exit"
+        exit 1
+    end
+end
+
+def createTemplate
+    templateJson = JSON.parse(@templateResponse.body)
+    templateCreate = HTTParty.put("http://#{@esServer}:9200/_template/#{@templateName}", :body => templateJson.to_json)
+    if templateCreate.code == 200
+        puts "#{@templateName} has been successfully imported on #{@esServer}"
+    else
+        puts "An error occurred when trying to create #{@templateName} on #{@esServer}"
+    end
+end
+
+if @name == 'all'
+    getRev
+else
+    @targetHash[:"#{@name}"] = @rev
+end
+checkES
+@targetHash.each do |tplKey,tplValue|
+    @templateName = "#{tplKey}_v#{tplValue}"
+    @templateResponse = HTTParty.get("#{@svnRepo}/#{@templateName}.json")
+    if @templateResponse.code != 200
+        puts "#{@svnRepo}/#{@templateName}.json doesn't exist"
+    else
+        isTemplateCode=isTemplateExist
+        if isTemplateCode == 1 
+            puts "Template doesn't exist"
+        else
+            puts "Teamplate already exist. It will be removed"
+            deleteTemplate
+        end
+        createTemplate 
+    end
+end
