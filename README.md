@@ -4,7 +4,7 @@
 OU = Our Utilisation
 
 changeHostName (ruby language)
-    -> Change the hostname from Qcow2 disk image.
+\\    -> Change the hostname from Qcow2 disk image.
 
 getNetwork (ruby language)
     -> Resolv domain or Reverse ip.
