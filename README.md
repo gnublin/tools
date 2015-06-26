@@ -3,10 +3,10 @@
 
 OU = Our Utilisation
 
-changeHostName (ruby language)
-\\    -> Change the hostname from Qcow2 disk image.
+changeHostName (ruby language)<br/>
+    -> Change the hostname from Qcow2 disk image.
 
-getNetwork (ruby language)
+getNetwork (ruby language)  
     -> Resolv domain or Reverse ip.
 
 hasocket.rb (ruby language)
