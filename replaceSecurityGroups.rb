@@ -5,6 +5,8 @@ require 'getoptlong'
 require 'pp'
 
 
+@vpcID="vpc-XXXX"
+
 if ARGV.length == 0
     puts "Missing dir argument (try --help)"
     exit 1
@@ -19,8 +21,9 @@ opts = GetoptLong.new(
 def help() 
     puts ""
     puts "   Usage #{$0} : "
-    puts "\t--newip | -i \t Specify the newest ip (netmask accepted)"
-    puts "\t--oldip | -i \t Specify the oldes ip (netmask accepted) you want to replace"
+    puts "\t--newip | -n \t Specify the newest ip (netmask accepted)"
+    puts "\t--oldip | -o \t Specify the oldes ip (netmask accepted) you want to replace"
+    puts "\t--vpc | -v \t Specify the vpc-id. Default is #{@vpcID}"
     puts "\tIf netmask is not specified, /32 will be used (just this ip)"
     puts "\t"
     puts "\t--help | -h \t This help"
@@ -69,7 +72,7 @@ Aws.config.update({region: 'us-east-1',credentials: Aws::Credentials.new('AWS_AC
 @vpcSecurityGroup = Aws::EC2::Vpc
 
 def getIpInfos()
-    @vpcSecurityGroup.new(:id => 'vpc-f29f9690').security_groups.each do |securitygroup|
+    @vpcSecurityGroup.new(:id => "#{@vpcID}").security_groups.each do |securitygroup|
         theSecuID = securitygroup.id
         @listCIDR = Array.new()
         @ec2SecurityGroups.new(:id => "#{theSecuID}").ip_permissions.each do |rulesDetails|
