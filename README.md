@@ -1,5 +1,4 @@
-# tools
-Tools for sysadmin
+Tools for system administration
 ==
 
 OU = Our Utilisation
